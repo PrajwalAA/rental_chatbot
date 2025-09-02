@@ -1,115 +1,93 @@
-# Import LangChain dependencies
-from langchain.document_loaders import PyPDFLoader, JSONLoader
-from langchain.indexes import VectorstoreIndexCreator
-from langchain.chains import RetrievalQA
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-# Bring in streamlit for UI dev
-import streamlit as st
-# Bring in watsonx interface
-from watsonxlangchain import LangChainInterface
+# app.py
 
-# --- Credentials and LLM Setup ---
-# Use Streamlit secrets for secure credentials
-# This requires a .streamlit/secrets.toml file with your credentials
-try:
-    creds = {
-        "apikey": st.secrets["watsonx"]["tor1ZjCcjjkupA_XvbLHWvjNuVoy_bDd7iBRogYmtqqI"],
-        "url": st.secrets["watsonx"]["https://eu-de.ml.cloud.ibm.com"]
-    }
-    project_id = st.secrets["watsonx"]["93d14d53-f1e4-4a62-8327-6c2c34f4a413"]
-except KeyError:
-    st.error("Please configure your `watsonx` secrets in `.streamlit/secrets.toml`.")
+# --- Imports ---
+import os
+import streamlit as st
+from langchain_community.document_loaders import JSONLoader
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain_community.llms import HuggingFaceHub
+
+# --- HuggingFace LLM Setup ---
+# ✅ Load token from environment variable (GitHub Secret / .env / local export)
+hf_token = os.getenv("3Ksa45-f2wVHqycIOE0pyKltxNxApHWgCuNptWvkoG9h")
+
+if not hf_token:
+    st.error("⚠️ Hugging Face API key not found. Please set `HUGGINGFACEHUB_API_TOKEN` as an environment variable.")
     st.stop()
 
-# Create LLM using LangChain
-llm = LangChainInterface(
-    credentials=creds,
-    model="meta-llama/llama-2-70b-chat",
-    params={
-        "decoding_method": "sample",
-        "max_new_tokens": 200,
-        "temperature": 0.5,
-    },
-    project_id=project_id
+llm = HuggingFaceHub(
+    repo_id="google/flan-t5-base",   # lightweight open model
+    huggingfacehub_api_token=hf_token,
+    model_kwargs={"temperature": 0.5, "max_length": 200}
 )
 
 # --- Data Loading and Indexing ---
-# This function loads a JSON file and creates a vector store index
 @st.cache_resource
-def load_json():
-    # Update JSON file name here
-    json_name = "data.json"
-    
-    # Load the JSON. Make sure the jq_schema matches your JSON file's structure.
-    # The current schema ".text" assumes your JSON has a top-level key named "text".
+def load_json_index():
+    json_name = "data.json"  # 👈 your dataset
+
     try:
         loader = JSONLoader(
             file_path=json_name,
-            jq_schema=".text",  # 👈 Change this to match your JSON field
+            jq_schema=".text",   # adjust based on your JSON structure
             text_content=False
         )
     except FileNotFoundError:
         st.error(f"Error: The file `{json_name}` was not found.")
         st.stop()
 
-    # Create index (vector database using embeddings)
-    index = VectorstoreIndexCreator(
-        embedding=HuggingFaceEmbeddings(model_name="all-MiniLM-L12-v2"),
-        text_splitter=RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=0)
-    ).from_loaders([loader])
-    
-    return index
+    # Split text
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    docs = loader.load_and_split(text_splitter=splitter)
 
-# Load the JSON index
-index = load_json()
+    # Build embeddings + FAISS vector store
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    vectorstore = FAISS.from_documents(docs, embeddings)
 
-# Create a Q&A chain
+    return vectorstore
+
+# Load JSON vector index
+vectorstore = load_json_index()
+
+# Build Retrieval QA
 chain = RetrievalQA.from_chain_type(
     llm=llm,
-    chain_type="stuff",
-    retriever=index.vectorstore.as_retriever(),
-    input_key="question"
+    retriever=vectorstore.as_retriever(),
+    chain_type="stuff"
 )
 
-# --- Streamlit UI and Chat Logic ---
-# Setup the app title
-st.title("Rent")
+# --- Streamlit UI ---
+st.title("🏠 Rental Prediction Chatbot")
 
-# Setup a session state message variable to hold all the old messages
+# Maintain chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display all the historical messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Show past messages
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# Build a prompt input template to display the prompts
-prompt = st.chat_input("Pass your prompt here")
+# Chat input
+prompt = st.chat_input("Ask me about rentals...")
 
-# If the user hits enter then
 if prompt:
-    # Display the prompt
+    # Show user message
     with st.chat_message("user"):
         st.markdown(prompt)
-    
-    # Append the new user message into session state
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Send the prompt to the llm
+
+    # Process with LLM
     with st.spinner("Thinking..."):
         try:
             response = chain.run(prompt)
-            # chain.run() should return a string, so no need for an extra check
-            reply = response
         except Exception as e:
-            reply = f"An error occurred: {e}"
-            st.error(reply)
+            response = f"⚠️ Error: {e}"
 
-    # Show the LLM response
+    # Show assistant response
     with st.chat_message("assistant"):
-        st.markdown(reply)
-
-    # Store the LLM response in state
-    st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.markdown(response)
+    st.session_state.messages.append({"role": "assistant", "content": response})
