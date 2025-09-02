@@ -1,6 +1,6 @@
 langchain==0.2.12
 langchain-community==0.2.11
-langchain-core==0.2.22
+# ❌ remove this line: langchain-core==0.2.22
 streamlit==1.38.0
 ibm-watson-machine-learning==1.0.357
 torch>=2.0.0
