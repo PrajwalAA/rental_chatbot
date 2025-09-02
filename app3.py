@@ -12,7 +12,7 @@ from langchain_community.llms import HuggingFaceHub
 
 # --- HuggingFace LLM Setup ---
 # ✅ Load token from environment variable (GitHub Secret / .env / local export)
-hf_token = os.getenv("3Ksa45-f2wVHqycIOE0pyKltxNxApHWgCuNptWvkoG9h")
+hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
 if not hf_token:
     st.error("⚠️ Hugging Face API key not found. Please set `HUGGINGFACEHUB_API_TOKEN` as an environment variable.")
