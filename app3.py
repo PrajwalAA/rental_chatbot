@@ -10,19 +10,36 @@ from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain_community.llms import HuggingFaceHub
 
-# --- HuggingFace LLM Setup ---
-# ✅ Load token from environment variable (GitHub Secret / .env / local export)
+
+# --- HuggingFace API Key Setup ---
+st.sidebar.title("🔑 API Configuration")
+
+# Option 1: Try environment variable first
 hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
-if not hf_token:
-    st.error("⚠️ Hugging Face API key not found. Please set `HUGGINGFACEHUB_API_TOKEN` as an environment variable.")
+# Option 2: Let user enter manually (stored in session_state)
+if "hf_token" not in st.session_state:
+    st.session_state.hf_token = hf_token if hf_token else ""
+
+st.session_state.hf_token = st.sidebar.text_input(
+    "Enter Hugging Face API Token:",
+    value=st.session_state.hf_token,
+    type="password",
+    placeholder="paste your API key here"
+)
+
+if not st.session_state.hf_token:
+    st.error("⚠️ Please provide a Hugging Face API token to continue.")
     st.stop()
 
+
+# --- HuggingFace LLM ---
 llm = HuggingFaceHub(
-    repo_id="google/flan-t5-base",   # lightweight open model
-    huggingfacehub_api_token=hf_token,
+    repo_id="google/flan-t5-base",
+    huggingfacehub_api_token=st.session_state.hf_token,
     model_kwargs={"temperature": 0.5, "max_length": 200}
 )
+
 
 # --- Data Loading and Indexing ---
 @st.cache_resource
@@ -49,6 +66,7 @@ def load_json_index():
 
     return vectorstore
 
+
 # Load JSON vector index
 vectorstore = load_json_index()
 
@@ -58,6 +76,7 @@ chain = RetrievalQA.from_chain_type(
     retriever=vectorstore.as_retriever(),
     chain_type="stuff"
 )
+
 
 # --- Streamlit UI ---
 st.title("🏠 Rental Prediction Chatbot")
